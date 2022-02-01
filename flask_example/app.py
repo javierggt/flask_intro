@@ -3,7 +3,7 @@
 """
 """
 
-from flask import Flask, request
+from flask import Flask, request, url_for
 from flask_restful import reqparse
 
 from mica.archive import obspar
@@ -27,6 +27,24 @@ def get_obspar():
     pars = obspar.get_obspar(obsid)
 
     return {'obspar': pars}, 200
+
+
+@app.route('/', methods=['GET'])
+def root():
+    """
+    Root page.
+    """
+    url = url_for('get_obspar')
+    text = f"""
+    <html>
+        <body>
+            <h1>OBSPAR Service<h1>
+
+            <a href="{url}?obsid=8008"> Check this out </a>
+        </body>
+    </html>
+    """
+    return text
 
 
 if __name__ == "__main__":
