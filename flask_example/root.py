@@ -13,7 +13,7 @@ def root():
         <body>
             <h1>OBSPAR Service<h1>
 
-            <a href="{url_for('obspar.get_obspar')}?obsid=8008"> Check this out </a>
+            <a href="{url_for('obspar.view_obspar')}?obsid=8008"> Check this out </a>
         </body>
     </html>
     """

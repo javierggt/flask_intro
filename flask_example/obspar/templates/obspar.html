@@ -1,0 +1,14 @@
+<html>
+  <head></head>
+  <body>
+    <h1> OBSPAR {{ data.obsid }} </h1>
+    <table>  
+      {% for par in data.pars %}
+      <tr>
+        <td> {{ par }} </td>
+        <td> {{ data.pars[par] }} </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </body>
+</html>
