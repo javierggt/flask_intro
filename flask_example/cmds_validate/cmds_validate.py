@@ -530,33 +530,7 @@ def main(opt):
         else:
             logger.info('validation warning(s) in output at %s' % opt.outdir)
 
-    write_index_rst(opt, proc, plots_validation, valid_viols)
-    rst_to_html(opt, proc)
-
-
-def rst_to_html(opt, proc):
-    """Run rst2html.py to render index.rst as HTML"""
-
-    # First copy CSS files to outdir
-    shutil.copy2(Path(docutils.writers.html4css1.__file__).parent / 'html4css1.css', opt.outdir)
-    shutil.copy2(Path(__file__).parent / 'validate_states.css', opt.outdir)
-
-    spawn = Ska.Shell.Spawn(stdout=None)
-    infile = os.path.join(opt.outdir, 'index.rst')
-    outfile = os.path.join(opt.outdir, 'index.html')
-    status = spawn.run(['rst2html.py',
-                        '--stylesheet-path=%s' % os.path.join(opt.outdir, 'validate_states.css'),
-                        infile, outfile])
-    if status != 0:
-        proc['errors'].append('rst2html.py failed with status %d: check run log.' % status)
-        logger.error('rst2html.py failed')
-        logger.error(''.join(spawn.outlines) + '\n')
-
-    # Remove the stupid <colgroup> field that docbook inserts.  This
-    # <colgroup> prevents HTML table auto-sizing.
-    del_colgroup = re.compile(r'<colgroup>.*?</colgroup>', re.DOTALL)
-    outtext = del_colgroup.sub('', open(outfile).read())
-    open(outfile, 'w').write(outtext)
+    write_index_html(opt, proc, plots_validation, valid_viols)
 
 
 def write_states(opt, states):
@@ -574,22 +548,23 @@ def write_states(opt, states):
     out.close()
 
 
-def write_index_rst(opt, proc, plots_validation, valid_viols=None):
+def write_index_html(opt, proc, plots_validation, valid_viols=None):
     """
-    Make output text (in ReST format) in opt.outdir.
+    Make output text in HTML format in opt.outdir.
     """
-    outfile = os.path.join(opt.outdir, 'index.rst')
+    outfile = Path(opt.outdir) / 'index.html'
     logger.info('Writing report file %s' % outfile)
     context = {'opt': opt,
                'valid_viols': valid_viols,
                'proc': proc,
                'plots_validation': plots_validation,
                }
-    index_template_file = Path(__file__).parent / 'index_template.rst'
+    index_template_file = Path(__file__).parent / 'templates' / 'index.html'
     index_template = index_template_file.read_text()
-    index_template = re.sub(r' %}\n', ' %}', index_template)
+    # index_template = re.sub(r' %}\n', ' %}', index_template)
     template = jinja2.Template(index_template)
-    open(outfile, 'w').write(template.render(context))
+    out = template.render(context)
+    outfile.write_text(out)
 
 
 def get_states_kadi(datestart, datestop):

@@ -1,13 +1,11 @@
-@import url("html4css1.css");
-
 pre.red { color: red }
 pre.green { color: green }
 span.red { color: red }
 span.blue { color: blue }
 span.green { color: green }
 
-body { 
-  max-width:950px; 
+body {
+  max-width:950px;
   font-family: sans-serif;
 }
 
