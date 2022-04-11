@@ -1,12 +1,12 @@
 <html>
   <head></head>
   <body>
-    <h1> OBSPAR {{ data.obsid }} </h1>
-    <table>  
-      {% for par in data.pars %}
+    <h1> OBSPAR {{ pars['obsid'] }} </h1>
+    <table>
+      {% for key in pars %}
       <tr>
-        <td> {{ par }} </td>
-        <td> {{ data.pars[par] }} </td>
+        <td> {{ key }} </td>
+        <td> {{ pars[key] }} </td>
       </tr>
       {% endfor %}
     </table>
