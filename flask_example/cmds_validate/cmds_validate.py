@@ -8,8 +8,6 @@ from pathlib import Path
 import sys
 import os
 import logging
-import re
-from pprint import pformat
 import time
 import functools
 
@@ -35,8 +33,8 @@ import cheta.fetch_sci as fetch
 from cheta.utils import logical_intervals
 from cxotime import CxoTime
 from Quaternion import Quat, normalize
+from kadi.commands.states import interpolate_states
 
-import Chandra.cmd_states as cmd_states
 import characteristics
 from characteristics import validation_limits, validation_scale_count
 
@@ -139,34 +137,6 @@ MODE_MSIDS = {'pcad_mode': ['NMAN', 'NPNT', 'NSUN', 'NULL',
               }
 
 
-def get_options():
-    from optparse import OptionParser
-    parser = OptionParser()
-    parser.set_defaults()
-    parser.add_option("--outdir",
-                      default="out",
-                      help="Output directory")
-    parser.add_option("--days",
-                      type='float',
-                      default=7.0,
-                      help="Days of validation data (days)")
-    parser.add_option("--run_start_time",
-                      help="Mock tool run time for regression testing")
-    parser.add_option("--traceback",
-                      default=True,
-                      help='Enable tracebacks')
-    parser.add_option("--verbose",
-                      type='int',
-                      default=1,
-                      help="Verbosity (0=quiet, 1=normal, 2=debug)")
-    parser.add_option("--version",
-                      action='store_true',
-                      help="Print version")
-
-    opt, args = parser.parse_args()
-    return opt, args
-
-
 def config_logging(outdir, verbose):
     """Set up file and console logger.
     See http://docs.python.org/library/logging.html#logging-to-multiple-destinations
@@ -241,29 +211,14 @@ def get_bad_mask(tlm):
     return mask
 
 
-def main(opt):
-    opt, args = get_options()
-    if not os.path.exists(opt.outdir):
-        os.mkdir(opt.outdir)
-
-    config_logging(opt.outdir, opt.verbose)
-
+def validate_cmd_states(days=4, run_start_time=None):
     # Store info relevant to processing for use in outputs
     proc = dict(run_user=os.environ['USER'],
                 run_time=time.ctime(),
                 errors=[],
                 )
-    logger.info('#####################################################################')
-    logger.info('# %s run at %s by %s' % (os.path.dirname(__file__),
-                                          proc['run_time'], proc['run_user']))
-    logger.info('# version = %s' % VERSION)
-    logger.info('# characteristics version = %s' % characteristics.VERSION)
-    logger.info('#####################################################################\n')
 
-    logger.info('Command line options:\n%s\n' % pformat(opt.__dict__))
-
-    # Connect to database (NEED TO USE aca_read)
-    tnow = CxoTime(opt.run_start_time).secs
+    tnow = CxoTime(run_start_time).secs
     tstart = tnow
 
     # Get temperature telemetry for 3 weeks prior to min(tstart, NOW)
@@ -275,7 +230,7 @@ def main(opt):
                             '1de28avo', '1deicacu',
                             '1dp28avo', '1dpicacu',
                             '1dp28bvo', '1dpicbcu'],
-                           days=opt.days,
+                           days=days,
                            name_map={'sim_z': 'tscpos',
                                      'cobsrqid': 'obsid'})
 
@@ -286,7 +241,7 @@ def main(opt):
     bad_time_mask = get_bad_mask(tlm)
 
     # Interpolate states onto the tlm.date grid
-    state_vals = cmd_states.interpolate_states(states, tlm['date'])
+    state_vals = interpolate_states(states, tlm['date'])
 
     # "Forgive" dither intervals with dark current replicas
     # This will also exclude dither disables that are in cmd states for standard dark cals
@@ -501,24 +456,14 @@ def main(opt):
         plots_validation.append(plot)
 
     valid_viols.extend(make_validation_viols(plots_validation))
-    if len(valid_viols) > 0:
-        # generate daily plot url if outdir in expected year/day format
-        daymatch = re.match(r'.*(\d{4})/(\d{3})', opt.outdir)
-        if daymatch:
-            url = os.path.join(URL, daymatch.group(1), daymatch.group(2))
-            logger.info('validation warning(s) at %s' % url)
-        else:
-            logger.info('validation warning(s) in output at %s' % opt.outdir)
-
-    write_index_html(opt, proc, plots_validation, valid_viols)
+    html = get_index_html(opt, proc, plots_validation, valid_viols)
+    return html
 
 
-def write_index_html(opt, proc, plots_validation, valid_viols=None):
+def get_index_html(opt, proc, plots_validation, valid_viols=None):
     """
-    Make output text in HTML format in opt.outdir.
+    Make output text in HTML format in outdir.
     """
-    outfile = Path(opt.outdir) / 'index.html'
-    logger.info('Writing report file %s' % outfile)
     context = {'opt': opt,
                'valid_viols': valid_viols,
                'proc': proc,
@@ -529,7 +474,7 @@ def write_index_html(opt, proc, plots_validation, valid_viols=None):
     # index_template = re.sub(r' %}\n', ' %}', index_template)
     template = jinja2.Template(index_template)
     out = template.render(context)
-    outfile.write_text(out)
+    return out
 
 
 def get_states_kadi(datestart, datestop):
@@ -546,11 +491,7 @@ def get_states_kadi(datestart, datestop):
     states['tstart'] = CxoTime(states['datestart']).secs
     states['tstop'] = CxoTime(states['datestop']).secs
 
-    # Convert to recarray and return
-    sa = states.as_array()
-    rsa = np.recarray(sa.shape, dtype=sa.dtype, names=sa.dtype.names, buf=sa.data)
-
-    return rsa
+    return states
 
 
 def get_states(datestart, datestop):
@@ -568,10 +509,10 @@ def get_states(datestart, datestop):
     # to date and back to secs.  (The reference tstop could be just over the
     # 0.001 precision of date and thus cause an out-of-bounds error when
     # interpolating state values).
-    states[0].tstart = CxoTime(datestart).secs - 0.01
-    states[0].datestart = CxoTime(states[0].tstart).date
-    states[-1].tstop = CxoTime(datestop).secs + 0.01
-    states[-1].datestop = CxoTime(states[-1].tstop).date
+    states[0]['tstart'] = CxoTime(datestart).secs - 0.01
+    states[0]['datestart'] = CxoTime(states[0]['tstart']).date
+    states[-1]['tstop'] = CxoTime(datestop).secs + 0.01
+    states[-1]['datestop'] = CxoTime(states[-1]['tstop']).date
 
     return states
 
@@ -616,14 +557,26 @@ def make_validation_viols(plots_validation):
     return viols
 
 
+def get_options():
+    from optparse import OptionParser
+    parser = OptionParser()
+    parser.set_defaults()
+    parser.add_option("--days",
+                      type='float',
+                      default=4.0,
+                      help="Days of validation data (days)")
+    parser.add_option("--run_start_time",
+                      help="Mock tool run time for regression testing")
+    parser.add_option("--verbose",
+                      type='int',
+                      default=1,
+                      help="Verbosity (0=quiet, 1=normal, 2=debug)")
+
+    opt, args = parser.parse_args()
+    return opt, args
+
+
 if __name__ == '__main__':
     opt, args = get_options()
-
-    try:
-        main(opt)
-    except Exception as msg:
-        if opt.traceback:
-            raise
-        else:
-            print("ERROR:", msg)
-            sys.exit(1)
+    out = validate_cmd_states(days=opt.days, run_start_time=opt.run_start_time)
+    print(out)
