@@ -5,11 +5,11 @@
 import base64
 import io
 from pathlib import Path
-import sys
 import os
 import logging
 import time
 import functools
+import traceback
 
 from flask import Blueprint  # , render_template, abort
 from flask_restful import reqparse
@@ -35,8 +35,8 @@ from cxotime import CxoTime
 from Quaternion import Quat, normalize
 from kadi.commands.states import interpolate_states
 
-import characteristics
-from characteristics import validation_limits, validation_scale_count
+from . import characteristics
+from .characteristics import validation_limits, validation_scale_count
 
 __all__ = ['cmds_validate']
 
@@ -53,19 +53,20 @@ def get_cmds_validate():
     try:
         parser = reqparse.RequestParser()
         parser.add_argument('scenario', help='scenario', type=str, default=None)
+        parser.add_argument('days', help='Lookback days', type=float, default=4)
+        parser.add_argument('run_start_time', help='Run start time', type=str, default=None)
         args = parser.parse_args()
-        pars = {'scenario': args.scenario}
-        # Do something
-        # if len(pars) == 0:
-        #     return ({
-        #         'error': f'No OBSID {args.obsid}',
-        #         'obspar': {}
-        #     }, 404)
-
+        html = validate_cmd_states(**dict(args))
     except werkzeug.exceptions.BadRequest as e:
         return {'error': str(e), 'scenario': {}}, 400
 
-    return pars, 200
+    except Exception:
+        stack_trace = traceback.format_exc()
+        msg = ('<!doctype html><meta charset=utf-8><title>shortest html5</title>'
+               + f'<pre>{stack_trace}</pre>')
+        return msg, 500
+
+    return html, 200
 
 
 # @cmds_validate.route('/', methods=['GET'])
@@ -211,7 +212,7 @@ def get_bad_mask(tlm):
     return mask
 
 
-def validate_cmd_states(days=4, run_start_time=None):
+def validate_cmd_states(days=4, run_start_time=None, scenario=None):
     # Store info relevant to processing for use in outputs
     proc = dict(run_user=os.environ['USER'],
                 run_time=time.ctime(),
@@ -397,6 +398,7 @@ def validate_cmd_states(days=4, run_start_time=None):
 
         out = io.BytesIO()
         fig.savefig(out, format='JPEG')
+        plt.close(fig)
         plot['lines'] = base64.b64encode(out.getvalue()).decode('ascii')
 
         if msid not in diff_only:
@@ -451,21 +453,21 @@ def validate_cmd_states(days=4, run_start_time=None):
 
             out = io.BytesIO()
             fig.savefig(out, format='JPEG')
+            plt.close(fig)
             plot['hist' + histscale] = base64.b64encode(out.getvalue()).decode('ascii')
 
         plots_validation.append(plot)
 
     valid_viols.extend(make_validation_viols(plots_validation))
-    html = get_index_html(opt, proc, plots_validation, valid_viols)
+    html = get_index_html(proc, plots_validation, valid_viols)
     return html
 
 
-def get_index_html(opt, proc, plots_validation, valid_viols=None):
+def get_index_html(proc, plots_validation, valid_viols=None):
     """
     Make output text in HTML format in outdir.
     """
-    context = {'opt': opt,
-               'valid_viols': valid_viols,
+    context = {'valid_viols': valid_viols,
                'proc': proc,
                'plots_validation': plots_validation,
                }
