@@ -2,6 +2,8 @@
 
 """
 """
+import base64
+import io
 from pathlib import Path
 import sys
 import os
@@ -9,8 +11,7 @@ import logging
 import re
 from pprint import pformat
 import time
-import shutil
-import pickle
+import functools
 
 from flask import Blueprint  # , render_template, abort
 from flask_restful import reqparse
@@ -19,7 +20,6 @@ import werkzeug
 import numpy as np
 from itertools import count
 import jinja2
-import docutils.writers.html4css1
 
 # Matplotlib setup
 import matplotlib
@@ -43,6 +43,8 @@ from characteristics import validation_limits, validation_scale_count
 __all__ = ['cmds_validate']
 
 cmds_validate = Blueprint('cmds_validate', __name__, template_folder='templates')
+
+plot_cxctime = functools.partial(plot_cxctime, interactive=False)
 
 
 @cmds_validate.route('/', methods=['GET'])
@@ -146,7 +148,7 @@ def get_options():
                       help="Output directory")
     parser.add_option("--days",
                       type='float',
-                      default=21.0,
+                      default=7.0,
                       help="Days of validation data (days)")
     parser.add_option("--run_start_time",
                       help="Mock tool run time for regression testing")
@@ -278,9 +280,7 @@ def main(opt):
                                      'cobsrqid': 'obsid'})
 
     tlm['tscpos'] = tlm['tscpos'] * -397.7225924607
-    outdir = opt.outdir
     states = get_states(tlm[0].date, tlm[-1].date)
-    write_states(opt, states)
 
     # Get bad time intervals
     bad_time_mask = get_bad_mask(tlm)
@@ -387,28 +387,28 @@ def main(opt):
     quant_table += quant_head + "\n"
     for fig_id, msid in enumerate(sorted(pred)):
         plot = dict(msid=msid.upper())
-        fig = plt.figure(10 + fig_id, figsize=(7, 3.5))
-        fig.clf()
         scale = SCALES.get(msid, 1.0)
-        ax = None
+        fig, ax = plt.subplots(figsize=(7, 3.5))
+
         if msid not in diff_only:
             if msid in MODE_MSIDS:
                 state_msid = np.zeros(len(tlm))
                 for mode, idx in zip(MODE_MSIDS[msid], count()):
                     state_msid[state_vals[msid] == mode] = idx
-                ticklocs, fig, ax = plot_cxctime(tlm['date'],
-                                                 tlm[msid], fig=fig, fmt='-r')
-                ticklocs, fig, ax = plot_cxctime(tlm['date'],
-                                                 state_msid, fig=fig, fmt='-b')
-                plt.yticks(range(len(MODE_MSIDS[msid])), MODE_MSIDS[msid])
+                ticklocs, fig, ax = plot_cxctime(tlm['date'], tlm[msid],
+                                                 fig=fig, ax=ax, fmt='-r')
+                ticklocs, _, _ = plot_cxctime(tlm['date'], state_msid,
+                                              fig=fig, ax=ax, fmt='-b')
+                ax.set_yticks(range(len(MODE_MSIDS[msid])), MODE_MSIDS[msid])
             else:
-                ticklocs, fig, ax = plot_cxctime(tlm['date'],
-                                                 tlm[msid] / scale, fig=fig, fmt='-r')
-                ticklocs, fig, ax = plot_cxctime(tlm['date'],
-                                                 pred[msid] / scale, fig=fig, fmt='-b')
+                ticklocs, fig, ax = plot_cxctime(tlm['date'], tlm[msid] / scale,
+                                                 fig=fig, ax=ax, fmt='-r')
+                ticklocs, fig, ax = plot_cxctime(tlm['date'], pred[msid] / scale,
+                                                 fig=fig, ax=ax, fmt='-b')
         else:
             ticklocs, fig, ax = plot_cxctime(diff_only[msid]['date'],
-                                             diff_only[msid]['diff'] / scale, fig=fig, fmt='-k')
+                                             diff_only[msid]['diff'] / scale,
+                                             fig=fig, ax=ax, fmt='-k')
         plot['diff_only'] = msid in diff_only
         ax.set_title(TITLE[msid])
         ax.set_ylabel(LABELS[msid])
@@ -437,13 +437,12 @@ def main(opt):
                                                 edgecolor='none')
             ax.add_patch(rect)
 
-        filename = msid + '_valid.png'
-        outfile = os.path.join(outdir, filename)
-        logger.info('Writing plot file %s' % outfile)
-        plt.tight_layout()
-        plt.margins(0.05)
-        fig.savefig(outfile)
-        plot['lines'] = filename
+        ax.margins(0.05)
+        fig.tight_layout()
+
+        out = io.BytesIO()
+        fig.savefig(out, format='JPEG')
+        plot['lines'] = base64.b64encode(out.getvalue()).decode('ascii')
 
         if msid not in diff_only:
             ok = ~bad_time_mask
@@ -488,37 +487,18 @@ def main(opt):
             quant_table += quant_line + "\n"
 
         for histscale in ('lin', 'log'):
-            fig = plt.figure(20 + fig_id, figsize=(4, 3))
-            fig.clf()
-            ax = fig.gca()
+            fig, ax = plt.subplots(figsize=(4, 3))
             ax.hist(diff / scale, bins=50, log=(histscale == 'log'))
             ax.set_title(msid.upper() + ' residuals: telem - cmd states', fontsize=11)
             ax.set_xlabel(LABELS[msid])
             fig.subplots_adjust(bottom=0.18)
-            plt.tight_layout()
-            filename = '%s_valid_hist_%s.png' % (msid, histscale)
-            outfile = os.path.join(outdir, filename)
-            logger.info('Writing plot file %s' % outfile)
-            fig.savefig(outfile)
-            plot['hist' + histscale] = filename
+            fig.tight_layout()
+
+            out = io.BytesIO()
+            fig.savefig(out, format='JPEG')
+            plot['hist' + histscale] = base64.b64encode(out.getvalue()).decode('ascii')
 
         plots_validation.append(plot)
-
-    filename = os.path.join(outdir, 'validation_quant.csv')
-    logger.info('Writing quantile table %s' % filename)
-    f = open(filename, 'w')
-    f.write(quant_table)
-    f.close()
-
-    # If run_start_time is specified this is likely for regression testing
-    # or other debugging.  In this case write out the full predicted and
-    # telemetered dataset as a pickle.
-    if opt.run_start_time:
-        filename = os.path.join(outdir, 'validation_data.pkl')
-        logger.info('Writing validation data %s' % filename)
-        f = open(filename, 'w')
-        pickle.dump({'pred': pred, 'tlm': tlm}, f, protocol=-1)
-        f.close()
 
     valid_viols.extend(make_validation_viols(plots_validation))
     if len(valid_viols) > 0:
@@ -531,21 +511,6 @@ def main(opt):
             logger.info('validation warning(s) in output at %s' % opt.outdir)
 
     write_index_html(opt, proc, plots_validation, valid_viols)
-
-
-def write_states(opt, states):
-    """Write states recarray to file states.dat"""
-    outfile = os.path.join(opt.outdir, 'states.dat')
-    logger.info('Writing states to %s' % outfile)
-    out = open(outfile, 'w')
-    fmt = {'pitch': '%.2f',
-           'tstart': '%.2f',
-           'tstop': '%.2f',
-           }
-    newcols = list(states.dtype.names)
-    newstates = np.rec.fromarrays([states[x] for x in newcols], names=newcols)
-    Ska.Numpy.pprint(newstates, fmt, out)
-    out.close()
 
 
 def write_index_html(opt, proc, plots_validation, valid_viols=None):

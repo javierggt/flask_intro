@@ -189,16 +189,16 @@
                 <p>Red = telemetry, blue = model</p>
                 {% endif %}
 
-                <img src="{{plot.lines}}" alt="{{plot.lines}}" />
+                <img src="data:image/jpeg;base64,{{plot.lines}}" />
 
                 {% if plot.histlog %}
-                <img src="{{plot.histlog}}" alt="{{plot.histlog}}" />
+                <img src="data:image/jpeg;base64,{{plot.histlog}}" />
                 {% else %}
                 <p>No histogram provided.</p>
                 {% endif %}
 
                 {% if plot.histlin %}
-                <img src="{{plot.histlin}}" alt="{{plot.histlin}}" />
+                <img src="data:image/jpeg;base64,{{plot.histlin}}" />
                 {% endif %}
 
                 {% if plot.samples %}
