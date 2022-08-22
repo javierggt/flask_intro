@@ -29,7 +29,7 @@ from Ska.Matplotlib import plot_cxctime
 from Ska.Matplotlib import cxctime2plotdate as cxc2pd
 import Ska.Shell
 import Ska.Numpy
-import cheta.fetch_sci as fetch
+import cheta.fetch_eng as fetch
 from cheta.utils import logical_intervals
 from cxotime import CxoTime
 from Quaternion import Quat, normalize
@@ -38,14 +38,14 @@ from kadi.commands.states import interpolate_states
 from . import characteristics
 from .characteristics import validation_limits, validation_scale_count
 
-__all__ = ['cmds_validate']
+__all__ = ['blueprint']
 
-cmds_validate = Blueprint('cmds_validate', __name__, template_folder='templates')
+blueprint = Blueprint('cmds_validate', __name__, template_folder='templates')
 
 plot_cxctime = functools.partial(plot_cxctime, interactive=False)
 
 
-@cmds_validate.route('/', methods=['GET'])
+@blueprint.route('/', methods=['GET'])
 def get_cmds_validate():
     """
     Service to validate kadi commands v2 against telemetry
@@ -104,7 +104,7 @@ TITLE = {'dp_pitch': 'Pitch',
 
 LABELS = {'dp_pitch': 'Pitch (degrees)',
           'obsid': 'OBSID',
-          'tscpos': 'SIM-Z (steps/1000)',
+          'tscpos': 'SIM-Z (steps)',
           'pcad_mode': 'PCAD MODE',
           'dither': 'Dither',
           'letg': 'LETG',
@@ -113,8 +113,7 @@ LABELS = {'dp_pitch': 'Pitch (degrees)',
           'roll': 'Roll Offset (arcsec)'}
 
 
-SCALES = {'tscpos': 1000.,
-          'dither': 1.}
+SCALES = {'dither': 1.}
 
 FMTS = {'dp_pitch': '%.3f',
         'obsid': '%d',
@@ -186,7 +185,8 @@ def get_telem_values(tstart, msids, days=14, dt=32.8, name_map={}):
     start = CxoTime(tstart - days * 86400).date
     stop = CxoTime(tstart).date
     logger.info('Fetching telemetry between %s and %s' % (start, stop))
-    msidset = fetch.Msidset(msids, start, stop)
+    with fetch.data_source('cxc', 'maude'):
+        msidset = fetch.Msidset(msids, start, stop)
     start = max(x.times[0] for x in msidset.values())
     stop = min(x.times[-1] for x in msidset.values())
     msidset.interpolate(dt, start, stop)
@@ -224,7 +224,7 @@ def validate_cmd_states(days=4, run_start_time=None, scenario=None):
 
     # Get temperature telemetry for 3 weeks prior to min(tstart, NOW)
     tlm = get_telem_values(tstart,
-                           ['sim_z', 'dp_pitch', 'aoacaseq',
+                           ['3tscpos', 'aosares1', 'aoacaseq',
                             'aodithen', 'cacalsta', 'cobsrqid', 'aofunlst',
                             'aopcadmd', '4ootgsel', '4ootgmtn',
                             'aocmdqt1', 'aocmdqt2', 'aocmdqt3',
@@ -232,10 +232,10 @@ def validate_cmd_states(days=4, run_start_time=None, scenario=None):
                             '1dp28avo', '1dpicacu',
                             '1dp28bvo', '1dpicbcu'],
                            days=days,
-                           name_map={'sim_z': 'tscpos',
+                           name_map={'3tscpos': 'tscpos',
+                                     'aosares1': 'dp_pitch',
                                      'cobsrqid': 'obsid'})
 
-    tlm['tscpos'] = tlm['tscpos'] * -397.7225924607
     states = get_states(tlm[0].date, tlm[-1].date)
 
     # Get bad time intervals

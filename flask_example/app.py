@@ -4,12 +4,12 @@
 """
 
 
-from flask import Flask, render_template
 import werkzeug.exceptions
+from flask import Flask, render_template
 
+from cmds_validate import blueprint as cmds_validate
 from obspar import blueprint as obspar
 from root import blueprint as root
-from cmds_validate import cmds_validate
 
 
 def page_not_found(error):
